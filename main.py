@@ -356,28 +356,42 @@ def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
 
     url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
-    payload = {
-        "token_uid": token_uid,
-        "num": 400,
-        "offset": 0,
-        "find": "",
-        "only_clients": 1,
-    }
 
-    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
+    all_rows = []
+    offset = 0
+    page_size = 500
 
-    rows = data.get("data", {}).get("clienti", [])
+    while True:
+        payload = {
+            "token_uid": token_uid,
+            "num": page_size,
+            "offset": offset,
+            "find": "",
+            "only_clients": 1,
+        }
+
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        rows = data.get("data", {}).get("clienti", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        offset += page_size
 
     return [
         {
             "id": str(row.get("anagrafica_id", "")),
             "name": row.get("anagrafica_ragione_sociale", ""),
         }
-        for row in rows
+        for row in all_rows
     ]
-
 
 @app.get("/syncrogest/plants")
 def get_plants(client_id: str = Query(...), user=Depends(require_user)):
