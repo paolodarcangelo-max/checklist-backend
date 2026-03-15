@@ -69,6 +69,37 @@ os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
 
 
+def get_all_syncrogest_plants(token_uid: str):
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+
+    all_rows = []
+    offset = 0
+    page_size = 500
+
+    while True:
+        payload = {
+            "token_uid": token_uid,
+            "num": page_size,
+            "offset": offset,
+        }
+
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        rows = data.get("data", {}).get("impianti", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        offset += page_size
+
+    return all_rows
+
 def db_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -353,19 +384,7 @@ def get_syncrogest_token():
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-
-    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
-    payload = {
-        "token_uid": token_uid,
-        "num": 5000,
-        "offset": 0,
-    }
-
-    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-
-    rows = data.get("data", {}).get("impianti", [])
+    rows = get_all_syncrogest_plants(token_uid)
 
     clients_map = {}
 
@@ -529,18 +548,7 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
     if not query:
         return []
 
-    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
-    payload = {
-        "token_uid": token_uid,
-        "num": 5000,
-        "offset": 0,
-    }
-
-    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-
-    rows = data.get("data", {}).get("impianti", [])
+    rows = get_all_syncrogest_plants(token_uid)
     results = []
 
     for row in rows:
@@ -587,19 +595,19 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
         )
 
         haystack = " | ".join([
-            client_name,
-            address,
-            plant_name,
-            matricola,
+            str(client_name),
+            str(address),
+            str(plant_name),
+            str(matricola),
         ]).lower()
 
         if query in haystack:
             results.append({
                 "id": plant_id,
                 "client_id": client_id,
-                "client_name": client_name,
-                "address": address,
-                "plant_name": plant_name,
+                "client_name": str(client_name),
+                "address": str(address),
+                "plant_name": str(plant_name),
                 "matricola": str(matricola),
             })
 
