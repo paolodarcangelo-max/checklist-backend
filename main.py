@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import os
@@ -24,10 +24,6 @@ from openpyxl.styles import Font, PatternFill
 
 app = FastAPI(title="Checklist Backend")
 
-# =========================
-# CORS
-# =========================
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,10 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# =========================
-# CONFIG
-# =========================
 
 SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret")
 ALGORITHM = "HS256"
@@ -62,7 +54,7 @@ SYNCROGEST_PASSWORD = os.getenv("SYNCROGEST_PASSWORD", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 
 SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = int(os.getenv("SMTP_PORT") or "587")
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
@@ -76,14 +68,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
 
-# =========================
-# DB
-# =========================
 
 def db_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     conn = db_conn()
@@ -120,9 +110,11 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 @app.on_event("startup")
 def startup_event():
     init_db()
+
 
 def row_to_checklist_dict(row: sqlite3.Row) -> dict:
     return {
@@ -143,6 +135,7 @@ def row_to_checklist_dict(row: sqlite3.Row) -> dict:
         "report_sent_at": row["report_sent_at"],
     }
 
+
 def db_insert_file(file_id: str, path: str):
     conn = db_conn()
     conn.execute(
@@ -152,6 +145,7 @@ def db_insert_file(file_id: str, path: str):
     conn.commit()
     conn.close()
 
+
 def db_get_file_path(file_id: str) -> Optional[str]:
     conn = db_conn()
     row = conn.execute(
@@ -160,6 +154,7 @@ def db_get_file_path(file_id: str) -> Optional[str]:
     ).fetchone()
     conn.close()
     return row["path"] if row else None
+
 
 def db_insert_checklist(record: dict):
     conn = db_conn()
@@ -201,6 +196,7 @@ def db_insert_checklist(record: dict):
     conn.commit()
     conn.close()
 
+
 def db_update_checklist_after_pdf(server_id: str, pdf_path: str, pdf_url: str, impianto_pdf_attached: bool, upload_response: Any):
     conn = db_conn()
     conn.execute("""
@@ -221,17 +217,20 @@ def db_update_checklist_after_pdf(server_id: str, pdf_path: str, pdf_url: str, i
     conn.commit()
     conn.close()
 
+
 def db_get_checklist(server_id: str) -> Optional[dict]:
     conn = db_conn()
     row = conn.execute("SELECT * FROM checklists WHERE server_id = ?", (server_id,)).fetchone()
     conn.close()
     return row_to_checklist_dict(row) if row else None
 
+
 def db_list_checklists() -> List[dict]:
     conn = db_conn()
     rows = conn.execute("SELECT * FROM checklists ORDER BY created_at DESC").fetchall()
     conn.close()
     return [row_to_checklist_dict(r) for r in rows]
+
 
 def db_list_pending_quote_reports() -> List[dict]:
     conn = db_conn()
@@ -242,6 +241,7 @@ def db_list_pending_quote_reports() -> List[dict]:
     """).fetchall()
     conn.close()
     return [row_to_checklist_dict(r) for r in rows]
+
 
 def db_mark_reports_sent(server_ids: List[str], when_iso: str):
     if not server_ids:
@@ -254,9 +254,6 @@ def db_mark_reports_sent(server_ids: List[str], when_iso: str):
     conn.commit()
     conn.close()
 
-# =========================
-# DEBUG
-# =========================
 
 @app.get("/debug/env")
 def debug_env():
@@ -273,22 +270,22 @@ def debug_env():
         "DB_PATH": DB_PATH,
     }
 
-# =========================
-# AUTH
-# =========================
 
 class LoginReq(BaseModel):
     username: str
     password: str
 
+
 class LoginRes(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
 
 def create_access_token(sub: str):
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_MINUTES)
     payload = {"sub": sub, "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
 
 def require_user(creds: HTTPAuthorizationCredentials = Depends(security)):
     token = creds.credentials
@@ -301,6 +298,7 @@ def require_user(creds: HTTPAuthorizationCredentials = Depends(security)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+
 @app.post("/auth/login", response_model=LoginRes)
 def login(req: LoginReq):
     user = USERS.get(req.username)
@@ -308,9 +306,6 @@ def login(req: LoginReq):
         raise HTTPException(status_code=401, detail="Bad credentials")
     return LoginRes(access_token=create_access_token(req.username))
 
-# =========================
-# SYNCROGEST
-# =========================
 
 def sg_headers():
     if not SYNCROGEST_API_KEY:
@@ -319,6 +314,7 @@ def sg_headers():
         "WS-API-KEY": SYNCROGEST_API_KEY,
         "Content-Type": "application/json",
     }
+
 
 def get_syncrogest_token():
     if SYNCROGEST_TOKEN_UID:
@@ -354,6 +350,7 @@ def get_syncrogest_token():
 
     return token_uid
 
+
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
@@ -380,6 +377,7 @@ def get_clients(user=Depends(require_user)):
         }
         for row in rows
     ]
+
 
 @app.get("/syncrogest/plants")
 def get_plants(client_id: str = Query(...), user=Depends(require_user)):
@@ -420,6 +418,13 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
             or row.get("ragione_sociale")
             or ""
         )
+        matricola = (
+            row.get("matricola")
+            or row.get("impianto_matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        )
 
         result.append({
             "id": str(row.get("impianto_id") or row.get("id") or ""),
@@ -427,13 +432,75 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
             "client_name": client_name,
             "address": address,
             "plant_name": plant_name,
+            "matricola": matricola,
         })
 
     return result
 
-# =========================
-# MODELS
-# =========================
+
+@app.get("/syncrogest/plant-by-matricola")
+def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_user)):
+    token_uid = get_syncrogest_token()
+
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+    payload = {
+        "token_uid": token_uid,
+        "num": 5000,
+        "offset": 0,
+    }
+
+    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+
+    rows = data.get("data", {}).get("impianti", [])
+
+    target = matricola.strip().upper()
+
+    for row in rows:
+
+        row_matricola = (
+            row.get("impianto_matricola")
+            or row.get("matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        )
+
+        row_matricola = str(row_matricola).strip().upper()
+
+        if row_matricola == target:
+
+            plant_name = (
+                row.get("impianto_nome")
+                or row.get("nome")
+                or row.get("descrizione")
+                or ""
+            )
+
+            address = (
+                row.get("impianto_indirizzo")
+                or row.get("indirizzo")
+                or row.get("ubicazione")
+                or ""
+            )
+
+            client_name = (
+                row.get("cliente_nome")
+                or row.get("ragione_sociale")
+                or ""
+            )
+
+            return {
+                "id": str(row.get("impianto_id") or row.get("id") or ""),
+                "client_id": str(row.get("cliente_id") or row.get("anagrafica_id") or ""),
+                "client_name": client_name,
+                "address": address,
+                "plant_name": plant_name,
+                "matricola": row_matricola,
+            }
+
+    raise HTTPException(status_code=404, detail="Impianto non trovato per matricola")
 
 class CheckItem(BaseModel):
     code: str
@@ -442,12 +509,14 @@ class CheckItem(BaseModel):
     note: Optional[str] = None
     photo_ids: List[str] = []
 
+
 class TodoItem(BaseModel):
     code: str
     label: str
     selected: bool
     note: Optional[str] = None
     photo_ids: List[str] = []
+
 
 class ChecklistCreate(BaseModel):
     local_id: str
@@ -461,13 +530,11 @@ class ChecklistCreate(BaseModel):
     checks: List[CheckItem]
     todos: List[TodoItem]
 
+
 class QuoteReportSendReq(BaseModel):
     recipients: List[str] = ["info@eadnet.it", "christian@eadnet.it"]
     mark_sent: bool = True
 
-# =========================
-# PDF
-# =========================
 
 def wrap_text(text: str, max_len: int = 95) -> List[str]:
     if not text:
@@ -487,17 +554,20 @@ def wrap_text(text: str, max_len: int = 95) -> List[str]:
     lines.append(current)
     return lines
 
+
 def draw_multiline(c: canvas.Canvas, x: float, y: float, text: str, line_height: float = 5 * mm, max_len: int = 95):
     for line in wrap_text(text, max_len=max_len):
         c.drawString(x, y, line)
         y -= line_height
     return y
 
+
 def ensure_space(c: canvas.Canvas, y: float, needed_mm: float = 30):
     if y < needed_mm * mm:
         c.showPage()
         return A4[1] - 20 * mm
     return y
+
 
 def draw_photo_grid(
     c: canvas.Canvas,
@@ -565,6 +635,7 @@ def draw_photo_grid(
 
     return y
 
+
 def generate_checklist_pdf(server_id: str, record: dict) -> str:
     payload = record["payload"]
 
@@ -596,6 +667,8 @@ def generate_checklist_pdf(server_id: str, record: dict) -> str:
     c.drawString(x_left, y, f"Impianto ID: {payload.get('plant_id', '')}")
     y -= 6 * mm
     c.drawString(x_left, y, f"Indirizzo: {payload.get('address', '') or ''}")
+    y -= 6 * mm
+    c.drawString(x_left, y, f"Tipo impianto: {payload.get('plant_type', '') or ''}")
     y -= 10 * mm
 
     has_ko = record.get("has_ko", False)
@@ -668,14 +741,12 @@ def generate_checklist_pdf(server_id: str, record: dict) -> str:
     c.save()
     return file_path
 
+
 def build_public_pdf_url(request: Request, server_id: str) -> str:
     if PUBLIC_BASE_URL:
         return f"{PUBLIC_BASE_URL}/checklists/{server_id}/pdf"
     return str(request.url_for("get_checklist_pdf", server_id=server_id))
 
-# =========================
-# SYNCROGEST ATTACH
-# =========================
 
 def syncrogest_upload_pdf_to_impianto(impianto_id: str, pdf_path: str):
     token_uid = get_syncrogest_token()
@@ -714,9 +785,6 @@ def syncrogest_upload_pdf_to_impianto(impianto_id: str, pdf_path: str):
         "json": response_json,
     }
 
-# =========================
-# EXCEL
-# =========================
 
 def create_quote_report_excel(items: List[dict]) -> str:
     now_tag = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -733,6 +801,7 @@ def create_quote_report_excel(items: List[dict]) -> str:
         "Nome impianto",
         "Impianto ID",
         "Indirizzo",
+        "Tipo impianto",
         "Esito",
         "Controlli KO",
         "Lavori da fare",
@@ -771,6 +840,7 @@ def create_quote_report_excel(items: List[dict]) -> str:
             payload.get("plant_name", "") or "",
             payload.get("plant_id", "") or "",
             payload.get("address", "") or "",
+            payload.get("plant_type", "") or "",
             "CON ANOMALIE" if item.get("has_negative") else "POSITIVO",
             " | ".join(ko_labels),
             " | ".join(todo_labels),
@@ -781,7 +851,7 @@ def create_quote_report_excel(items: List[dict]) -> str:
 
     widths = {
         "A": 16, "B": 28, "C": 14, "D": 28, "E": 14, "F": 30,
-        "G": 16, "H": 40, "I": 40, "J": 40, "K": 45, "L": 40,
+        "G": 28, "H": 16, "I": 40, "J": 40, "K": 40, "L": 45, "M": 40,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
@@ -789,9 +859,6 @@ def create_quote_report_excel(items: List[dict]) -> str:
     wb.save(file_path)
     return file_path
 
-# =========================
-# EMAIL
-# =========================
 
 def send_email_with_attachment(recipients: List[str], subject: str, body: str, attachment_path: str):
     if not SMTP_HOST or not SMTP_FROM:
@@ -827,14 +894,12 @@ def send_email_with_attachment(recipients: List[str], subject: str, body: str, a
                 server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
 
-# =========================
-# ROUTES
-# =========================
 
 @app.post("/checklists")
 def create_checklist(payload: ChecklistCreate, request: Request, user=Depends(require_user)):
     server_id = str(uuid.uuid4())
 
+    raw_payload = payload.dict()
     has_ko = any(not c.ok for c in payload.checks)
     has_todo = any(t.selected for t in payload.todos)
     has_negative = has_ko or has_todo
@@ -843,7 +908,7 @@ def create_checklist(payload: ChecklistCreate, request: Request, user=Depends(re
         "server_id": server_id,
         "created_by": user["username"],
         "created_at": datetime.utcnow().isoformat(),
-        "payload": payload.dict(),
+        "payload": raw_payload,
         "has_ko": has_ko,
         "has_todo": has_todo,
         "has_negative": has_negative,
@@ -888,9 +953,11 @@ def create_checklist(payload: ChecklistCreate, request: Request, user=Depends(re
         "syncrogest_upload_response": upload_response,
     }
 
+
 @app.get("/checklists")
 def list_checklists(user=Depends(require_user)):
     return db_list_checklists()
+
 
 @app.get("/checklists/{server_id}/pdf")
 def get_checklist_pdf(server_id: str):
@@ -908,9 +975,11 @@ def get_checklist_pdf(server_id: str):
         filename=os.path.basename(pdf_path),
     )
 
+
 @app.get("/quote-report/pending")
 def quote_report_pending(user=Depends(require_user)):
     return db_list_pending_quote_reports()
+
 
 @app.post("/quote-report/send")
 def quote_report_send(req: QuoteReportSendReq, user=Depends(require_user)):
@@ -951,6 +1020,7 @@ def quote_report_send(req: QuoteReportSendReq, user=Depends(require_user)):
         "report_path": report_path,
         "recipients": req.recipients,
     }
+
 
 @app.post("/files/upload")
 def upload_file(file: UploadFile = File(...), user=Depends(require_user)):
