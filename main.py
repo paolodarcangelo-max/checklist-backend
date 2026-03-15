@@ -350,47 +350,54 @@ def get_syncrogest_token():
 
     return token_uid
 
-
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-    url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
 
-    all_rows = []
-    offset = 0
-    page_size = 500
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+    payload = {
+        "token_uid": token_uid,
+        "num": 5000,
+        "offset": 0,
+    }
 
-    while True:
-        payload = {
-            "token_uid": token_uid,
-            "num": page_size,
-            "offset": offset,
-            "find": "",
-            "only_clients": 1,
-        }
+    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
 
-        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-        r.raise_for_status()
-        data = r.json()
+    rows = data.get("data", {}).get("impianti", [])
 
-        rows = data.get("data", {}).get("clienti", [])
-        if not rows:
-            break
+    clients_map = {}
 
-        all_rows.extend(rows)
+    for row in rows:
+        client_id = str(
+            row.get("cliente_id")
+            or row.get("anagrafica_id")
+            or ""
+        ).strip()
 
-        if len(rows) < page_size:
-            break
+        client_name = str(
+            row.get("cliente_nome")
+            or row.get("ragione_sociale")
+            or ""
+        ).strip()
 
-        offset += page_size
+        if not client_id or not client_name:
+            continue
 
-    return [
+        clients_map[client_id] = client_name
+
+    result = [
         {
-            "id": str(row.get("anagrafica_id", "")),
-            "name": row.get("anagrafica_ragione_sociale", ""),
+            "id": client_id,
+            "name": client_name,
         }
-        for row in all_rows
+        for client_id, client_name in clients_map.items()
     ]
+
+    result.sort(key=lambda x: x["name"].lower())
+    return result
+
 @app.get("/syncrogest/plants")
 def get_plants(client_id: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
