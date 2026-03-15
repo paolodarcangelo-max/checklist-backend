@@ -354,7 +354,6 @@ def get_syncrogest_token():
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-
     url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
 
     all_rows = []
@@ -392,7 +391,6 @@ def get_clients(user=Depends(require_user)):
         }
         for row in all_rows
     ]
-
 @app.get("/syncrogest/plants")
 def get_plants(client_id: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
@@ -515,6 +513,96 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
             }
 
     raise HTTPException(status_code=404, detail="Impianto non trovato per matricola")
+
+@app.get("/syncrogest/search-plants")
+def search_plants(q: str = Query(...), user=Depends(require_user)):
+    token_uid = get_syncrogest_token()
+
+    query = q.strip().lower()
+    if not query:
+        return []
+
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+    payload = {
+        "token_uid": token_uid,
+        "num": 5000,
+        "offset": 0,
+    }
+
+    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+
+    rows = data.get("data", {}).get("impianti", [])
+    results = []
+
+    for row in rows:
+        plant_name = (
+            row.get("impianto_nome")
+            or row.get("nome")
+            or row.get("descrizione")
+            or row.get("impianto_descrizione")
+            or ""
+        )
+
+        address = (
+            row.get("impianto_indirizzo")
+            or row.get("indirizzo")
+            or row.get("ubicazione")
+            or row.get("impianto_ubicazione")
+            or ""
+        )
+
+        client_name = (
+            row.get("cliente_nome")
+            or row.get("ragione_sociale")
+            or ""
+        )
+
+        client_id = str(
+            row.get("cliente_id")
+            or row.get("anagrafica_id")
+            or ""
+        )
+
+        plant_id = str(
+            row.get("impianto_id")
+            or row.get("id")
+            or ""
+        )
+
+        matricola = (
+            row.get("impianto_matricola")
+            or row.get("matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        )
+
+        haystack = " | ".join([
+            client_name,
+            address,
+            plant_name,
+            matricola,
+        ]).lower()
+
+        if query in haystack:
+            results.append({
+                "id": plant_id,
+                "client_id": client_id,
+                "client_name": client_name,
+                "address": address,
+                "plant_name": plant_name,
+                "matricola": str(matricola),
+            })
+
+    results.sort(key=lambda x: (
+        x["client_name"].lower(),
+        x["address"].lower(),
+        x["plant_name"].lower(),
+    ))
+
+    return results[:100]
 
 class CheckItem(BaseModel):
     code: str
