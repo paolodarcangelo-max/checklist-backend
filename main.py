@@ -116,41 +116,6 @@ def get_clients_lookup(token_uid: str):
 
     return lookup
 
-def get_all_syncrogest_plants(token_uid: str):
-    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
-
-    all_rows = []
-    offset = 0
-    page_size = 200
-
-    while True:
-        payload = {
-            "token_uid": token_uid,
-            "num": page_size,
-            "offset": offset,
-        }
-
-        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-
-        rows = data.get("data", {}).get("impianti", [])
-
-        print(f"[DEBUG] get_all_syncrogest_plants offset={offset} rows={len(rows)}")
-
-        if not rows:
-            break
-
-        all_rows.extend(rows)
-
-        if len(rows) < page_size:
-            break
-
-        offset += page_size
-
-    print(f"[DEBUG] total loaded plants = {len(all_rows)}")
-    return all_rows
-
 def normalize_plant_row(row: dict, clients_lookup: dict | None = None):
     client_id = _pick_first(row, [
         "cliente_id",
@@ -233,7 +198,7 @@ def get_all_syncrogest_plants(token_uid: str):
 
     all_rows = []
     offset = 0
-    page_size = 500
+    page_size = 200
 
     while True:
         payload = {
@@ -247,6 +212,9 @@ def get_all_syncrogest_plants(token_uid: str):
         data = r.json()
 
         rows = data.get("data", {}).get("impianti", [])
+
+        print(f"[DEBUG_PLANTS] offset={offset} count={len(rows)}")
+
         if not rows:
             break
 
@@ -257,6 +225,7 @@ def get_all_syncrogest_plants(token_uid: str):
 
         offset += page_size
 
+    print(f"[DEBUG_PLANTS] TOTAL={len(all_rows)}")
     return all_rows
 
 def db_conn():
