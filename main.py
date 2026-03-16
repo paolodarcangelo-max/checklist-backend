@@ -60,10 +60,12 @@ def get_all_syncrogest_clients(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
 
     all_rows = []
+    seen_ids = set()
     offset = 0
     page_size = 200
+    max_loops = 20
 
-    while True:
+    for _ in range(max_loops):
         payload = {
             "token_uid": token_uid,
             "num": page_size,
@@ -80,12 +82,30 @@ def get_all_syncrogest_clients(token_uid: str):
         if not rows:
             break
 
-        all_rows.extend(rows)
+        new_count = 0
+
+        for row in rows:
+            client_id = str(
+                row.get("anagrafica_id")
+                or row.get("cliente_id")
+                or ""
+            ).strip()
+
+            if client_id:
+                if client_id in seen_ids:
+                    continue
+                seen_ids.add(client_id)
+
+            all_rows.append(row)
+            new_count += 1
+
+        if new_count == 0:
+            break
 
         if len(rows) < page_size:
             break
 
-        offset += len(rows)
+        offset += page_size
 
     return all_rows
 
@@ -116,10 +136,12 @@ def get_all_syncrogest_plants(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
 
     all_rows = []
+    seen_ids = set()
     offset = 0
     page_size = 200
+    max_loops = 20  # predisposto per 4000 impianti
 
-    while True:
+    for _ in range(max_loops):
         payload = {
             "token_uid": token_uid,
             "num": page_size,
@@ -134,12 +156,28 @@ def get_all_syncrogest_plants(token_uid: str):
         if not rows:
             break
 
-        all_rows.extend(rows)
+        new_count = 0
+
+        for row in rows:
+            plant_id = str(row.get("impianto_id") or row.get("id") or "").strip()
+
+            # deduplica per evitare pagine ripetute o record duplicati
+            if plant_id:
+                if plant_id in seen_ids:
+                    continue
+                seen_ids.add(plant_id)
+
+            all_rows.append(row)
+            new_count += 1
+
+        # se la pagina è piena ma non aggiunge niente di nuovo, fermati
+        if new_count == 0:
+            break
 
         if len(rows) < page_size:
             break
 
-        offset += len(rows)
+        offset += page_size
 
     return all_rows
 
@@ -700,6 +738,7 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
             client_name = (
                 row.get("cliente_nome")
                 or row.get("ragione_sociale")
+                or row.get("anagrafica_ragione_sociale")
                 or ""
             )
 
@@ -745,6 +784,7 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
         client_name = str(
             row.get("cliente_nome")
             or row.get("ragione_sociale")
+            or row.get("anagrafica_ragione_sociale")
             or ""
         ).strip()
 
@@ -791,7 +831,39 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
         x["plant_name"].lower(),
     ))
 
-    return results[:100]
+    return results[:300]
+
+@app.get("/syncrogest/debug-plants-summary")
+def debug_plants_summary(user=Depends(require_user)):
+    token_uid = get_syncrogest_token()
+    rows = get_all_syncrogest_plants(token_uid)
+
+    ids = []
+    matricole = []
+
+    for row in rows:
+        pid = str(row.get("impianto_id") or row.get("id") or "").strip()
+        mat = str(
+            row.get("impianto_matricola")
+            or row.get("matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        ).strip()
+
+        if pid:
+            ids.append(pid)
+        if mat:
+            matricole.append(mat)
+
+    return {
+        "total_rows_loaded": len(rows),
+        "unique_ids": len(set(ids)),
+        "unique_matricole": len(set(matricole)),
+        "first_10_ids": ids[:10],
+        "last_10_ids": ids[-10:],
+        "last_10_matricole": matricole[-10:],
+    }
 
 @app.get("/syncrogest/debug-clients-count")
 def debug_clients_count(user=Depends(require_user)):
