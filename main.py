@@ -587,21 +587,37 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
 
     url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
-    payload = {
-        "token_uid": token_uid,
-        "cliente_id": client_id,
-        "num": 2000,
-        "offset": 0,
-    }
 
-    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
+    all_rows = []
+    offset = 0
+    page_size = 200
 
-    rows = data.get("data", {}).get("impianti", [])
+    while True:
+        payload = {
+            "token_uid": token_uid,
+            "cliente_id": client_id,
+            "num": page_size,
+            "offset": offset,
+        }
+
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        rows = data.get("data", {}).get("impianti", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        offset += page_size
+
     result = []
 
-    for row in rows:
+    for row in all_rows:
         plant_name = (
             row.get("impianto_nome")
             or row.get("nome")
@@ -609,6 +625,7 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
             or row.get("impianto_descrizione")
             or ""
         )
+
         address = (
             row.get("impianto_indirizzo")
             or row.get("indirizzo")
@@ -616,14 +633,17 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
             or row.get("impianto_ubicazione")
             or ""
         )
+
         client_name = (
             row.get("cliente_nome")
             or row.get("ragione_sociale")
+            or row.get("anagrafica_ragione_sociale")
             or ""
         )
+
         matricola = (
-            row.get("matricola")
-            or row.get("impianto_matricola")
+            row.get("impianto_matricola")
+            or row.get("matricola")
             or row.get("codice")
             or row.get("impianto_codice")
             or ""
@@ -638,8 +658,13 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
             "matricola": matricola,
         })
 
-    return result
+    result.sort(key=lambda x: (
+        x["address"].lower(),
+        x["plant_name"].lower(),
+        x["matricola"].lower(),
+    ))
 
+    return result
 
 @app.get("/syncrogest/plant-by-matricola")
 def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_user)):
