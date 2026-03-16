@@ -488,7 +488,7 @@ def debug_plants_pages(user=Depends(require_user)):
     def fetch_page(offset_value: int):
         payload = {
             "token_uid": token_uid,
-            "num": 500,
+            "num": 200,
             "offset": offset_value,
         }
         r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
@@ -506,15 +506,15 @@ def debug_plants_pages(user=Depends(require_user)):
         }
 
     p0 = fetch_page(0)
-    p500 = fetch_page(500)
-    p1000 = fetch_page(1000)
+    p200 = fetch_page(200)
+    p400 = fetch_page(400)
 
     return {
         "page_0": p0,
-        "page_500": p500,
-        "page_1000": p1000,
-        "same_0_500": p0["first_ids"] == p500["first_ids"],
-        "same_500_1000": p500["first_ids"] == p1000["first_ids"],
+        "page_200": p200,
+        "page_400": p400,
+        "same_0_200": p0["first_ids"] == p200["first_ids"],
+        "same_200_400": p200["first_ids"] == p400["first_ids"],
     }
 
 @app.post("/auth/login", response_model=LoginRes)
@@ -649,11 +649,11 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
     token_uid = get_syncrogest_token()
     rows = get_all_syncrogest_plants(token_uid)
 
+    clients_lookup = get_clients_lookup(token_uid)
     target = matricola.strip().upper()
 
     for row in rows:
-        item = normalize_plant_row(row)
-
+        item = normalize_plant_row(row, clients_lookup=clients_lookup)
         row_matricola = str(item["matricola"]).strip().upper()
 
         if row_matricola == target:
