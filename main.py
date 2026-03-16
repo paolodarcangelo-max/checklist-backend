@@ -56,6 +56,62 @@ def _pick_first(row: dict, keys: list[str]) -> str:
     return ""
 
 
+def get_all_syncrogest_clients(token_uid: str):
+    url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
+
+    all_rows = []
+    offset = 0
+    page_size = 500
+
+    while True:
+        payload = {
+            "token_uid": token_uid,
+            "num": page_size,
+            "offset": offset,
+            "find": "",
+            "only_clients": 1,
+        }
+
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        rows = data.get("data", {}).get("clienti", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        offset += page_size
+
+    return all_rows
+
+def get_clients_lookup(token_uid: str):
+    rows = get_all_syncrogest_clients(token_uid)
+    lookup = {}
+
+    for row in rows:
+        client_id = str(
+            row.get("anagrafica_id")
+            or row.get("cliente_id")
+            or ""
+        ).strip()
+
+        client_name = str(
+            row.get("anagrafica_ragione_sociale")
+            or row.get("cliente_nome")
+            or row.get("ragione_sociale")
+            or ""
+        ).strip()
+
+        if client_id and client_name:
+            lookup[client_id] = client_name
+
+    return lookup
+
 def get_all_syncrogest_plants(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
 
@@ -88,7 +144,7 @@ def get_all_syncrogest_plants(token_uid: str):
     return all_rows
 
 
-def normalize_plant_row(row: dict):
+def normalize_plant_row(row: dict, clients_lookup: dict | None = None):
     client_id = _pick_first(row, [
         "cliente_id",
         "anagrafica_id",
@@ -101,6 +157,9 @@ def normalize_plant_row(row: dict):
         "anagrafica_ragione_sociale",
         "client_name",
     ])
+
+    if not client_name and clients_lookup and client_id in clients_lookup:
+        client_name = clients_lookup[client_id]
 
     plant_id = _pick_first(row, [
         "impianto_id",
@@ -478,27 +537,15 @@ def get_syncrogest_token():
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-    rows = get_all_syncrogest_plants(token_uid)
-
-    clients_map = {}
-
-    for row in rows:
-        item = normalize_plant_row(row)
-
-        client_id = item["client_id"]
-        client_name = item["client_name"]
-
-        if not client_id or not client_name:
-            continue
-
-        clients_map[client_id] = client_name
+    clients_lookup = get_clients_lookup(token_uid)
 
     result = [
         {
             "id": client_id,
             "name": client_name,
         }
-        for client_id, client_name in clients_map.items()
+        for client_id, client_name in clients_lookup.items()
+        if client_id and client_name
     ]
 
     result.sort(key=lambda x: x["name"].lower())
@@ -630,6 +677,7 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
 @app.get("/syncrogest/search-plants")
 def search_plants(q: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
+    clients_lookup = get_clients_lookup(token_uid)
 
     query = q.strip().lower()
     if not query:
@@ -639,7 +687,7 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
     results = []
 
     for row in rows:
-        item = normalize_plant_row(row)
+        item = normalize_plant_row(row, clients_lookup=clients_lookup)
 
         haystack = " | ".join([
             item["client_name"],
