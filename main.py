@@ -45,6 +45,100 @@ USERS = {
     }
 }
 
+def _pick_first(row: dict, keys: list[str]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            return value
+    return ""
+
+
+def get_all_syncrogest_plants(token_uid: str):
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+
+    all_rows = []
+    offset = 0
+    page_size = 500
+
+    while True:
+        payload = {
+            "token_uid": token_uid,
+            "num": page_size,
+            "offset": offset,
+        }
+
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        rows = data.get("data", {}).get("impianti", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break
+
+        offset += page_size
+
+    return all_rows
+
+
+def normalize_plant_row(row: dict):
+    client_id = _pick_first(row, [
+        "cliente_id",
+        "anagrafica_id",
+        "client_id",
+    ])
+
+    client_name = _pick_first(row, [
+        "cliente_nome",
+        "ragione_sociale",
+        "anagrafica_ragione_sociale",
+        "client_name",
+    ])
+
+    plant_id = _pick_first(row, [
+        "impianto_id",
+        "id",
+    ])
+
+    plant_name = _pick_first(row, [
+        "impianto_nome",
+        "nome",
+        "descrizione",
+        "impianto_descrizione",
+        "plant_name",
+    ])
+
+    address = _pick_first(row, [
+        "impianto_indirizzo",
+        "indirizzo",
+        "ubicazione",
+        "impianto_ubicazione",
+        "address",
+    ])
+
+    matricola = _pick_first(row, [
+        "impianto_matricola",
+        "matricola",
+        "codice",
+        "impianto_codice",
+    ])
+
+    return {
+        "client_id": client_id,
+        "client_name": client_name,
+        "plant_id": plant_id,
+        "plant_name": plant_name,
+        "address": address,
+        "matricola": matricola,
+    }
+
 SYNCROGEST_BASE = "https://app.syncrogest.it/api/v1"
 SYNCROGEST_API_KEY = os.getenv("SYNCROGEST_API_KEY", "")
 SYNCROGEST_TOKEN_UID = os.getenv("SYNCROGEST_TOKEN_UID", "")
@@ -389,17 +483,10 @@ def get_clients(user=Depends(require_user)):
     clients_map = {}
 
     for row in rows:
-        client_id = str(
-            row.get("cliente_id")
-            or row.get("anagrafica_id")
-            or ""
-        ).strip()
+        item = normalize_plant_row(row)
 
-        client_name = str(
-            row.get("cliente_nome")
-            or row.get("ragione_sociale")
-            or ""
-        ).strip()
+        client_id = item["client_id"]
+        client_name = item["client_name"]
 
         if not client_id or not client_name:
             continue
@@ -552,63 +639,23 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
     results = []
 
     for row in rows:
-        plant_name = (
-            row.get("impianto_nome")
-            or row.get("nome")
-            or row.get("descrizione")
-            or row.get("impianto_descrizione")
-            or ""
-        )
-
-        address = (
-            row.get("impianto_indirizzo")
-            or row.get("indirizzo")
-            or row.get("ubicazione")
-            or row.get("impianto_ubicazione")
-            or ""
-        )
-
-        client_name = (
-            row.get("cliente_nome")
-            or row.get("ragione_sociale")
-            or ""
-        )
-
-        client_id = str(
-            row.get("cliente_id")
-            or row.get("anagrafica_id")
-            or ""
-        )
-
-        plant_id = str(
-            row.get("impianto_id")
-            or row.get("id")
-            or ""
-        )
-
-        matricola = (
-            row.get("impianto_matricola")
-            or row.get("matricola")
-            or row.get("codice")
-            or row.get("impianto_codice")
-            or ""
-        )
+        item = normalize_plant_row(row)
 
         haystack = " | ".join([
-            str(client_name),
-            str(address),
-            str(plant_name),
-            str(matricola),
+            item["client_name"],
+            item["address"],
+            item["plant_name"],
+            item["matricola"],
         ]).lower()
 
         if query in haystack:
             results.append({
-                "id": plant_id,
-                "client_id": client_id,
-                "client_name": str(client_name),
-                "address": str(address),
-                "plant_name": str(plant_name),
-                "matricola": str(matricola),
+                "id": item["plant_id"],
+                "client_id": item["client_id"],
+                "client_name": item["client_name"],
+                "address": item["address"],
+                "plant_name": item["plant_name"],
+                "matricola": item["matricola"],
             })
 
     results.sort(key=lambda x: (
@@ -618,6 +665,30 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
     ))
 
     return results[:100]
+
+@app.get("/syncrogest/debug-clients-count")
+def debug_clients_count(user=Depends(require_user)):
+    token_uid = get_syncrogest_token()
+    rows = get_all_syncrogest_plants(token_uid)
+
+    clients_map = {}
+    valid_rows = 0
+
+    for row in rows:
+        item = normalize_plant_row(row)
+        if item["client_id"] and item["client_name"]:
+            valid_rows += 1
+            clients_map[item["client_id"]] = item["client_name"]
+
+    sample = sorted(clients_map.values())[:30]
+
+    return {
+        "total_plants_rows": len(rows),
+        "valid_rows_with_client": valid_rows,
+        "unique_clients": len(clients_map),
+        "sample_clients": sample,
+    }
+
 
 class CheckItem(BaseModel):
     code: str
