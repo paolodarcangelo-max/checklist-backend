@@ -571,19 +571,39 @@ def get_syncrogest_token():
 @app.get("/syncrogest/clients")
 def get_clients(user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-    clients_lookup = get_clients_lookup(token_uid)
+    rows = get_all_syncrogest_clients(token_uid)
 
-    result = [
-        {
-            "id": client_id,
-            "name": client_name,
-        }
-        for client_id, client_name in clients_lookup.items()
-        if client_id and client_name
+    result = []
+    for row in rows:
+        client_id = str(
+            row.get("anagrafica_id")
+            or row.get("cliente_id")
+            or ""
+        ).strip()
+
+        client_name = str(
+            row.get("anagrafica_ragione_sociale")
+            or row.get("cliente_nome")
+            or row.get("ragione_sociale")
+            or ""
+        ).strip()
+
+        if client_id and client_name:
+            result.append({
+                "id": client_id,
+                "name": client_name,
+            })
+
+    unique = {}
+    for item in result:
+        unique[item["id"]] = item["name"]
+
+    final_result = [
+        {"id": k, "name": v}
+        for k, v in unique.items()
     ]
-
-    result.sort(key=lambda x: x["name"].lower())
-    return result
+    final_result.sort(key=lambda x: x["name"].lower())
+    return final_result
 
 @app.get("/syncrogest/plants")
 def get_plants(client_id: str = Query(...), user=Depends(require_user)):
@@ -649,20 +669,46 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
     token_uid = get_syncrogest_token()
     rows = get_all_syncrogest_plants(token_uid)
 
-    clients_lookup = get_clients_lookup(token_uid)
     target = matricola.strip().upper()
 
     for row in rows:
-        item = normalize_plant_row(row, clients_lookup=clients_lookup)
-        row_matricola = str(item["matricola"]).strip().upper()
+        row_matricola = str(
+            row.get("impianto_matricola")
+            or row.get("matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        ).strip().upper()
 
         if row_matricola == target:
+            plant_name = (
+                row.get("impianto_nome")
+                or row.get("nome")
+                or row.get("descrizione")
+                or row.get("impianto_descrizione")
+                or ""
+            )
+
+            address = (
+                row.get("impianto_indirizzo")
+                or row.get("indirizzo")
+                or row.get("ubicazione")
+                or row.get("impianto_ubicazione")
+                or ""
+            )
+
+            client_name = (
+                row.get("cliente_nome")
+                or row.get("ragione_sociale")
+                or ""
+            )
+
             return {
-                "id": item["plant_id"],
-                "client_id": item["client_id"],
-                "client_name": item["client_name"],
-                "address": item["address"],
-                "plant_name": item["plant_name"],
+                "id": str(row.get("impianto_id") or row.get("id") or ""),
+                "client_id": str(row.get("cliente_id") or row.get("anagrafica_id") or ""),
+                "client_name": client_name,
+                "address": address,
+                "plant_name": plant_name,
                 "matricola": row_matricola,
             }
 
@@ -671,7 +717,6 @@ def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_use
 @app.get("/syncrogest/search-plants")
 def search_plants(q: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-    clients_lookup = get_clients_lookup(token_uid)
 
     query = q.strip().lower()
     if not query:
@@ -681,23 +726,63 @@ def search_plants(q: str = Query(...), user=Depends(require_user)):
     results = []
 
     for row in rows:
-        item = normalize_plant_row(row, clients_lookup=clients_lookup)
+        plant_name = str(
+            row.get("impianto_nome")
+            or row.get("nome")
+            or row.get("descrizione")
+            or row.get("impianto_descrizione")
+            or ""
+        ).strip()
+
+        address = str(
+            row.get("impianto_indirizzo")
+            or row.get("indirizzo")
+            or row.get("ubicazione")
+            or row.get("impianto_ubicazione")
+            or ""
+        ).strip()
+
+        client_name = str(
+            row.get("cliente_nome")
+            or row.get("ragione_sociale")
+            or ""
+        ).strip()
+
+        client_id = str(
+            row.get("cliente_id")
+            or row.get("anagrafica_id")
+            or ""
+        ).strip()
+
+        plant_id = str(
+            row.get("impianto_id")
+            or row.get("id")
+            or ""
+        ).strip()
+
+        matricola = str(
+            row.get("impianto_matricola")
+            or row.get("matricola")
+            or row.get("codice")
+            or row.get("impianto_codice")
+            or ""
+        ).strip()
 
         haystack = " | ".join([
-            item["client_name"],
-            item["address"],
-            item["plant_name"],
-            item["matricola"],
+            client_name,
+            address,
+            plant_name,
+            matricola,
         ]).lower()
 
         if query in haystack:
             results.append({
-                "id": item["plant_id"],
-                "client_id": item["client_id"],
-                "client_name": item["client_name"],
-                "address": item["address"],
-                "plant_name": item["plant_name"],
-                "matricola": item["matricola"],
+                "id": plant_id,
+                "client_id": client_id,
+                "client_name": client_name,
+                "address": address,
+                "plant_name": plant_name,
+                "matricola": matricola,
             })
 
     results.sort(key=lambda x: (
