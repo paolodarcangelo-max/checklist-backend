@@ -221,7 +221,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
 
-
 def get_all_syncrogest_plants(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
 
@@ -482,6 +481,42 @@ def require_user(creds: HTTPAuthorizationCredentials = Depends(security)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+@app.get("/syncrogest/debug-plants-pages")
+def debug_plants_pages(user=Depends(require_user)):
+    token_uid = get_syncrogest_token()
+    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
+
+    def fetch_page(offset_value: int):
+        payload = {
+            "token_uid": token_uid,
+            "num": 500,
+            "offset": offset_value,
+        }
+        r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        rows = data.get("data", {}).get("impianti", [])
+        ids = [
+            str(row.get("impianto_id") or row.get("id") or "")
+            for row in rows[:10]
+        ]
+        return {
+            "offset": offset_value,
+            "count": len(rows),
+            "first_ids": ids,
+        }
+
+    p0 = fetch_page(0)
+    p500 = fetch_page(500)
+    p1000 = fetch_page(1000)
+
+    return {
+        "page_0": p0,
+        "page_500": p500,
+        "page_1000": p1000,
+        "same_0_500": p0["first_ids"] == p500["first_ids"],
+        "same_500_1000": p500["first_ids"] == p1000["first_ids"],
+    }
 
 @app.post("/auth/login", response_model=LoginRes)
 def login(req: LoginReq):
