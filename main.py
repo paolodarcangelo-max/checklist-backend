@@ -60,12 +60,10 @@ def get_all_syncrogest_clients(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_clienti/clienti"
 
     all_rows = []
-    seen_ids = set()
     offset = 0
     page_size = 200
-    max_loops = 20
 
-    for _ in range(max_loops):
+    while True:
         payload = {
             "token_uid": token_uid,
             "num": page_size,
@@ -79,34 +77,20 @@ def get_all_syncrogest_clients(token_uid: str):
         data = r.json()
 
         rows = data.get("data", {}).get("clienti", [])
+
+        print(f"[DEBUG] get_all_syncrogest_clients offset={offset} rows={len(rows)}")
+
         if not rows:
             break
 
-        new_count = 0
-
-        for row in rows:
-            client_id = str(
-                row.get("anagrafica_id")
-                or row.get("cliente_id")
-                or ""
-            ).strip()
-
-            if client_id:
-                if client_id in seen_ids:
-                    continue
-                seen_ids.add(client_id)
-
-            all_rows.append(row)
-            new_count += 1
-
-        if new_count == 0:
-            break
+        all_rows.extend(rows)
 
         if len(rows) < page_size:
             break
 
         offset += page_size
 
+    print(f"[DEBUG] total loaded clients = {len(all_rows)}")
     return all_rows
 
 def get_clients_lookup(token_uid: str):
@@ -136,12 +120,10 @@ def get_all_syncrogest_plants(token_uid: str):
     url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
 
     all_rows = []
-    seen_ids = set()
     offset = 0
     page_size = 200
-    max_loops = 20  # predisposto per 4000 impianti
 
-    for _ in range(max_loops):
+    while True:
         payload = {
             "token_uid": token_uid,
             "num": page_size,
@@ -153,32 +135,20 @@ def get_all_syncrogest_plants(token_uid: str):
         data = r.json()
 
         rows = data.get("data", {}).get("impianti", [])
+
+        print(f"[DEBUG] get_all_syncrogest_plants offset={offset} rows={len(rows)}")
+
         if not rows:
             break
 
-        new_count = 0
-
-        for row in rows:
-            plant_id = str(row.get("impianto_id") or row.get("id") or "").strip()
-
-            # deduplica per evitare pagine ripetute o record duplicati
-            if plant_id:
-                if plant_id in seen_ids:
-                    continue
-                seen_ids.add(plant_id)
-
-            all_rows.append(row)
-            new_count += 1
-
-        # se la pagina è piena ma non aggiunge niente di nuovo, fermati
-        if new_count == 0:
-            break
+        all_rows.extend(rows)
 
         if len(rows) < page_size:
             break
 
         offset += page_size
 
+    print(f"[DEBUG] total loaded plants = {len(all_rows)}")
     return all_rows
 
 def normalize_plant_row(row: dict, clients_lookup: dict | None = None):
