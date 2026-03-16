@@ -61,7 +61,7 @@ def get_all_syncrogest_clients(token_uid: str):
 
     all_rows = []
     offset = 0
-    page_size = 500
+    page_size = 200
 
     while True:
         payload = {
@@ -85,7 +85,7 @@ def get_all_syncrogest_clients(token_uid: str):
         if len(rows) < page_size:
             break
 
-        offset += page_size
+        offset += len(rows)
 
     return all_rows
 
@@ -117,7 +117,7 @@ def get_all_syncrogest_plants(token_uid: str):
 
     all_rows = []
     offset = 0
-    page_size = 500
+    page_size = 200
 
     while True:
         payload = {
@@ -139,10 +139,9 @@ def get_all_syncrogest_plants(token_uid: str):
         if len(rows) < page_size:
             break
 
-        offset += page_size
+        offset += len(rows)
 
     return all_rows
-
 
 def normalize_plant_row(row: dict, clients_lookup: dict | None = None):
     client_id = _pick_first(row, [
@@ -648,62 +647,22 @@ def get_plants(client_id: str = Query(...), user=Depends(require_user)):
 @app.get("/syncrogest/plant-by-matricola")
 def get_plant_by_matricola(matricola: str = Query(...), user=Depends(require_user)):
     token_uid = get_syncrogest_token()
-
-    url = f"{SYNCROGEST_BASE}/ws_impianti/impianti"
-    payload = {
-        "token_uid": token_uid,
-        "num": 5000,
-        "offset": 0,
-    }
-
-    r = requests.post(url, headers=sg_headers(), json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-
-    rows = data.get("data", {}).get("impianti", [])
+    rows = get_all_syncrogest_plants(token_uid)
 
     target = matricola.strip().upper()
 
     for row in rows:
+        item = normalize_plant_row(row)
 
-        row_matricola = (
-            row.get("impianto_matricola")
-            or row.get("matricola")
-            or row.get("codice")
-            or row.get("impianto_codice")
-            or ""
-        )
-
-        row_matricola = str(row_matricola).strip().upper()
+        row_matricola = str(item["matricola"]).strip().upper()
 
         if row_matricola == target:
-
-            plant_name = (
-                row.get("impianto_nome")
-                or row.get("nome")
-                or row.get("descrizione")
-                or ""
-            )
-
-            address = (
-                row.get("impianto_indirizzo")
-                or row.get("indirizzo")
-                or row.get("ubicazione")
-                or ""
-            )
-
-            client_name = (
-                row.get("cliente_nome")
-                or row.get("ragione_sociale")
-                or ""
-            )
-
             return {
-                "id": str(row.get("impianto_id") or row.get("id") or ""),
-                "client_id": str(row.get("cliente_id") or row.get("anagrafica_id") or ""),
-                "client_name": client_name,
-                "address": address,
-                "plant_name": plant_name,
+                "id": item["plant_id"],
+                "client_id": item["client_id"],
+                "client_name": item["client_name"],
+                "address": item["address"],
+                "plant_name": item["plant_name"],
                 "matricola": row_matricola,
             }
 
